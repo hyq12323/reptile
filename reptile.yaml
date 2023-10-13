@@ -1,0 +1,13 @@
+app:
+  id: reptile
+  debug: true
+  version: 1.0
+system:
+  url: https://cmis.cicpa.org.cn/
+static:
+  templatepath: static/template
+  outputpath: static/output
+baidu:
+  url: https://aip.baidubce.com/
+  apikey: WW9ID5Xw11WfXqUpx74Chxyj
+  secretkey: tQWGUjHvUeRLbyGRfq65m4LjXLw6Q98Q
