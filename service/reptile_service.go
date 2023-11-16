@@ -59,8 +59,8 @@ func Reptile() {
 		slog.Error("[Reptile]", "readExcel", err)
 		return
 	}
-	for _, info := range infos {
-		slog.Info("[Reptile]", "当前处理中的事务所", info.Name)
+	for i, info := range infos {
+		slog.Info("[Reptile]", "当前处理中的事务所", info.Name, "当前处理中序号", i)
 		func(req reply.ReadExcelReply) {
 			var registerInfos reptile_model.OfficeDetail
 			var firmDetail reptile_model.FirmDetail
@@ -131,7 +131,7 @@ func getFirmInfos(req reply.ReadExcelReply) (registerInfos reptile_model.OfficeD
 	codeResp := reply.CodeReply{}
 	codeResp, err = getPlatformCode("")
 	if err != nil {
-		slog.Error("[getRegisterInfos]", "getPlatformCode", err)
+		slog.Error("[getFirmInfos]", "getPlatformCode", err)
 		return
 	}
 	var text string
@@ -140,14 +140,14 @@ func getFirmInfos(req reply.ReadExcelReply) (registerInfos reptile_model.OfficeD
 		time.Sleep(500 * time.Millisecond)
 		text, err = getImageText(codeResp)
 		if err != nil {
-			slog.Error("[getRegisterInfos]", "getImageText", err)
+			slog.Error("[getFirmInfos]", "getImageText", err)
 			if err.Error() != "code len err" {
 				return
 			}
 			// 验证码解析失败，再次获取验证码
 			codeResp, err = getPlatformCode(codeResp.VerifyText)
 			if err != nil {
-				slog.Error("[getRegisterInfos]", "getPlatformCode", err)
+				slog.Error("[getFirmInfos]", "getPlatformCode", err)
 				return
 			}
 		}
@@ -168,13 +168,13 @@ func getFirmInfos(req reply.ReadExcelReply) (registerInfos reptile_model.OfficeD
 	officeUrl := conf.System().Url + officeUri
 	respBody, err := util.HttpPostByJson(officeUrl, officeParam, nil)
 	if err != nil {
-		slog.Error("[getRegisterInfos]", "util.HttpPostByJson", err)
+		slog.Error("[getFirmInfos]", "util.HttpPostByJson", err)
 		return
 	}
 	officeReply := reply.OfficeInfo{}
 	err = json.Unmarshal(respBody, &officeReply)
 	if err != nil {
-		slog.Error("[getRegisterInfos]", "json.Unmarshal", err)
+		slog.Error("[getFirmInfos]", "json.Unmarshal", err)
 		return
 	}
 	officeDetailParam := map[string]any{
@@ -185,13 +185,13 @@ func getFirmInfos(req reply.ReadExcelReply) (registerInfos reptile_model.OfficeD
 	officeDetailUrl := conf.System().Url + officeDetailUri
 	detailBody, err := util.HttpPostByJson(officeDetailUrl, officeDetailParam, nil)
 	if err != nil {
-		slog.Error("[getRegisterInfos]", "util.HttpPostByJson", err)
+		slog.Error("[getFirmInfos]", "util.HttpPostByJson", err)
 		return
 	}
 	var detailReply reply.RegisterInfoReply
 	err = json.Unmarshal(detailBody, &detailReply)
 	if err != nil {
-		slog.Error("[getRegisterInfos]", "json.Unmarshal", err)
+		slog.Error("[getFirmInfos]", "json.Unmarshal", err)
 		return
 	}
 	registerInfos = reptile_model.OfficeDetail{
