@@ -10,12 +10,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
-const timeOut = 10 * time.Second
-
-var client = &http.Client{Timeout: timeOut}
+var client = &http.Client{}
 
 func HttpPostByJson(apiUrl string, params map[string]any, headers map[string]string) (respBody []byte, err error) {
 	var body *bytes.Buffer

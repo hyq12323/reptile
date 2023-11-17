@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/tealeg/xlsx"
 	"github.com/xuri/excelize/v2"
@@ -45,6 +44,9 @@ var FirmDetailInfos []reptile_model.FirmDetail
 // Token 百度API的Token
 var Token string
 
+// RetryCount 重试次数
+var RetryCount = []int{1, 2, 3}
+
 // Reptile 主程序
 func Reptile() {
 	// 获取百度Token
@@ -60,7 +62,7 @@ func Reptile() {
 		return
 	}
 	for i, info := range infos {
-		slog.Info("[Reptile]", "当前处理中的事务所", info.Name, "当前处理中序号", i)
+		slog.Info("[Reptile]", "当前处理中的事务所", info.Name, "当前处理中序号", i+1, "总数", len(infos))
 		func(req reply.ReadExcelReply) {
 			var registerInfos reptile_model.OfficeDetail
 			var firmDetail reptile_model.FirmDetail
@@ -75,35 +77,30 @@ func Reptile() {
 			// 获取事务所数据
 			registerInfos, firmDetail, offGuid, branchInfo, err = getFirmInfos(req)
 			if err != nil {
-				slog.Error("[Reptile]", fmt.Sprintf("%s getRegisterInfos", req.Name), err)
 				return
 			}
 			time.Sleep(400 * time.Millisecond)
 			// 获取事务所合伙人数据
-			partnerInfos, err = getPartnerInfos(offGuid, registerInfos.PartnerCount)
+			partnerInfos, err = getPartnerInfos(offGuid, registerInfos.PartnerCount, req.Name)
 			if err != nil {
-				slog.Error("[Reptile]", fmt.Sprintf("%s getPartnerInfos", req.Name), err)
 				return
 			}
 			time.Sleep(400 * time.Millisecond)
 			// 获取注册会计师数据
 			accountantInfos, err = getAccountantInfos(offGuid, registerInfos.OffName, registerInfos.CpaNum)
 			if err != nil {
-				slog.Error("[Reptile]", fmt.Sprintf("%s getAccountantInfos", req.Name), err)
 				return
 			}
 			time.Sleep(400 * time.Millisecond)
 			// 获取从业人员数据
-			practitionerInfos, err = getPractitionerInfos(offGuid, registerInfos.OndutySum)
+			practitionerInfos, err = getPractitionerInfos(offGuid, registerInfos.OndutySum, req.Name)
 			if err != nil {
-				slog.Error("[Reptile]", fmt.Sprintf("%s getPractitionerInfos", req.Name), err)
 				return
 			}
 			time.Sleep(400 * time.Millisecond)
 			// 获取每个事务所分所的所有数据
 			branchInfos, err = getFirmBranchInfos(branchInfo)
 			if err != nil {
-				slog.Error("[Reptile]", fmt.Sprintf("%s getFirmBranchInfos", req.Name), err)
 				return
 			}
 			RegisterInfos = append(RegisterInfos, registerInfos)
@@ -136,24 +133,19 @@ func getFirmInfos(req reply.ReadExcelReply) (registerInfos reptile_model.OfficeD
 	}
 	var text string
 	for {
-		// 等待 0.5 秒
-		time.Sleep(500 * time.Millisecond)
-		text, err = getImageText(codeResp)
-		if err != nil {
-			slog.Error("[getFirmInfos]", "getImageText", err)
-			if err.Error() != "code len err" {
-				return
-			}
-			// 验证码解析失败，再次获取验证码
-			codeResp, err = getPlatformCode(codeResp.VerifyText)
-			if err != nil {
-				slog.Error("[getFirmInfos]", "getPlatformCode", err)
-				return
-			}
-		}
+		text = getImageText(codeResp)
+		slog.Info("[getFirmInfos]", "验证码", text)
 		if text != "" {
 			break
 		}
+		// 验证码解析失败，再次获取验证码
+		codeResp, err = getPlatformCode("")
+		if err != nil {
+			slog.Error("[getFirmInfos]", "getPlatformCode", err)
+			return
+		}
+		// 等待 0.5 秒
+		time.Sleep(500 * time.Millisecond)
 	}
 	officeParam := map[string]any{
 		"offName":     req.Name,
@@ -166,15 +158,15 @@ func getFirmInfos(req reply.ReadExcelReply) (registerInfos reptile_model.OfficeD
 	}
 	officeUri := "publicQuery/getOfficeList"
 	officeUrl := conf.System().Url + officeUri
-	respBody, err := util.HttpPostByJson(officeUrl, officeParam, nil)
+	officeReply := reply.OfficeInfo{}
+	var respBody []byte
+	respBody, err = util.HttpPostByJson(officeUrl, officeParam, nil)
 	if err != nil {
-		slog.Error("[getFirmInfos]", "util.HttpPostByJson", err)
 		return
 	}
-	officeReply := reply.OfficeInfo{}
 	err = json.Unmarshal(respBody, &officeReply)
 	if err != nil {
-		slog.Error("[getFirmInfos]", "json.Unmarshal", err)
+		slog.Info("getFirmInfos", req.Name, "事务所列表数据获取失败")
 		return
 	}
 	officeDetailParam := map[string]any{
@@ -183,16 +175,28 @@ func getFirmInfos(req reply.ReadExcelReply) (registerInfos reptile_model.OfficeD
 	}
 	officeDetailUri := "publicQuery/getOfficeDetailInfo"
 	officeDetailUrl := conf.System().Url + officeDetailUri
-	detailBody, err := util.HttpPostByJson(officeDetailUrl, officeDetailParam, nil)
-	if err != nil {
-		slog.Error("[getFirmInfos]", "util.HttpPostByJson", err)
-		return
-	}
 	var detailReply reply.RegisterInfoReply
-	err = json.Unmarshal(detailBody, &detailReply)
-	if err != nil {
-		slog.Error("[getFirmInfos]", "json.Unmarshal", err)
-		return
+	var detailBody []byte
+	for i := range RetryCount {
+		detailBody, err = util.HttpPostByJson(officeDetailUrl, officeDetailParam, nil)
+		if err != nil {
+			if i == 2 {
+				slog.Error("getFirmInfos", "util.HttpPostByJson", err)
+				return
+			}
+			time.Sleep(400 * time.Millisecond)
+			continue
+		}
+		err = json.Unmarshal(detailBody, &detailReply)
+		if err != nil {
+			if i == 2 {
+				slog.Error("getFirmInfos", req.Name, "基础数据获取失败")
+				return
+			}
+			time.Sleep(400 * time.Millisecond)
+			continue
+		}
+		break
 	}
 	registerInfos = reptile_model.OfficeDetail{
 		OffName:       detailReply.Info.HeadInfo.OffName,
@@ -223,7 +227,7 @@ func getFirmInfos(req reply.ReadExcelReply) (registerInfos reptile_model.OfficeD
 }
 
 // 获取合伙人信息
-func getPartnerInfos(offGuid string, partnerCountStr string) (partnerInfos []reptile_model.PartnerInfo, err error) {
+func getPartnerInfos(offGuid, partnerCountStr, name string) (partnerInfos []reptile_model.PartnerInfo, err error) {
 	// 获取股东总数
 	var partnerCount int
 	partnerCount, err = strconv.Atoi(partnerCountStr)
@@ -232,16 +236,28 @@ func getPartnerInfos(offGuid string, partnerCountStr string) (partnerInfos []rep
 	}
 	uri := fmt.Sprintf("publicQuery/getPartnerListByPage?offGuid=%s&pageNow=%d&pageSize=%d", offGuid, 1, partnerCount)
 	url := conf.System().Url + uri
-	respBody, err := util.HttpPostByJson(url, nil, nil)
-	if err != nil {
-		slog.Error("[getPartnerInfos]", "util.HttpPostByJson", err)
-		return
-	}
 	resp := reply.PartnerInfoReply{}
-	err = json.Unmarshal(respBody, &resp)
-	if err != nil {
-		slog.Error("[getPartnerInfos]", "json.Unmarshal", err)
-		return
+	var respBody []byte
+	for i := range RetryCount {
+		respBody, err = util.HttpPostByJson(url, nil, nil)
+		if err != nil {
+			if i == 2 {
+				slog.Error("getPartnerInfos", "util.HttpPostByJson", err)
+				return
+			}
+			time.Sleep(400 * time.Millisecond)
+			continue
+		}
+		err = json.Unmarshal(respBody, &resp)
+		if err != nil {
+			if i == 2 {
+				slog.Error("getPartnerInfos", name, "合伙人数据获取失败")
+				return
+			}
+			time.Sleep(400 * time.Millisecond)
+			continue
+		}
+		break
 	}
 	for i, row := range resp.Info.ResultMap.Rows {
 		isCpa := "是"
@@ -275,16 +291,29 @@ func getAccountantInfos(offGuid, offName, CpaNumStr string) (accountantInfos []r
 	}
 	uri := "publicQuery/getCpaList"
 	url := conf.System().Url + uri
-	respBody, err := util.HttpPostByJson(url, param, nil)
-	if err != nil {
-		slog.Error("[getAccountantInfos]", "util.HttpPostByJson", err)
-		return
-	}
 	resp := reply.AccountantInfoReply{}
-	err = json.Unmarshal(respBody, &resp)
-	if err != nil {
-		slog.Error("[getAccountantInfos]", "json.Unmarshal", err)
-		return
+	var respBody []byte
+	for i := range RetryCount {
+		respBody, err = util.HttpPostByJson(url, param, nil)
+		if err != nil {
+			if i == 2 {
+				slog.Error("getAccountantInfos", "util.HttpPostByJson", err)
+				return
+			}
+			time.Sleep(400 * time.Millisecond)
+			continue
+		}
+
+		err = json.Unmarshal(respBody, &resp)
+		if err != nil {
+			if i == 2 {
+				slog.Error("getAccountantInfos", offName, "注册会计师数据获取失败", err)
+				return
+			}
+			time.Sleep(400 * time.Millisecond)
+			continue
+		}
+		break
 	}
 	for i, info := range resp.Info.List {
 		accountantInfos = append(accountantInfos, reptile_model.AccountantInfo{
@@ -300,7 +329,7 @@ func getAccountantInfos(offGuid, offName, CpaNumStr string) (accountantInfos []r
 }
 
 // 获取从业人员信息
-func getPractitionerInfos(offGuid, ondutySumStr string) (practitionerInfos []reptile_model.PractitionerInfo, err error) {
+func getPractitionerInfos(offGuid, ondutySumStr, name string) (practitionerInfos []reptile_model.PractitionerInfo, err error) {
 	var ondutySum int
 	ondutySum, err = strconv.Atoi(ondutySumStr)
 	if err != nil {
@@ -309,16 +338,31 @@ func getPractitionerInfos(offGuid, ondutySumStr string) (practitionerInfos []rep
 
 	uri := fmt.Sprintf("publicQuery/getEmployeeListByPage?offGuid=%s&pageNow=%d&pageSize=%d", offGuid, 1, ondutySum)
 	url := conf.System().Url + uri
-	respBody, err := util.HttpPostByJson(url, nil, nil)
-	if err != nil {
-		slog.Error("[getPractitionerInfos]", "util.HttpPostByJson", err)
-		return
-	}
 	resp := reply.PractitionerInfoReply{}
-	err = json.Unmarshal(respBody, &resp)
-	if err != nil {
-		slog.Error("[getPractitionerInfos]", "json.Unmarshal", err)
-		return
+	var respBody []byte
+	for i := range RetryCount {
+		respBody, err = util.HttpPostByJson(url, nil, nil)
+		if err != nil {
+			if err != nil {
+				if i == 2 {
+					slog.Error("getPractitionerInfos", "util.HttpPostByJson", err)
+					return
+				}
+				time.Sleep(400 * time.Millisecond)
+				continue
+			}
+		}
+
+		err = json.Unmarshal(respBody, &resp)
+		if err != nil {
+			if i == 2 {
+				slog.Error("getPractitionerInfos", name, "从业人员数据获取失败")
+				return
+			}
+			time.Sleep(400 * time.Millisecond)
+			continue
+		}
+		break
 	}
 	for i, info := range resp.Info.ResultMap.Rows {
 		gender := "男"
@@ -372,18 +416,29 @@ func getFirmBranchInfos(branchInfo []reply.FirmBranchInfo) (firmBranchInfos repl
 			}
 			firmUrl := conf.System().Url + "publicQuery/getOfficeDetailInfo"
 			var firmBody []byte
-			firmBody, err = util.HttpPostByJson(firmUrl, firmParam, nil)
-			if err != nil {
-				slog.Error("[getFirmBranchInfos]", "util.HttpPostByJson", err)
-				return
+			firmResp := reply.FirmBranchInfoReply{}
+			for i := range RetryCount {
+				firmBody, err = util.HttpPostByJson(firmUrl, firmParam, nil)
+				if err != nil {
+					if i == 2 {
+						slog.Error("getFirmBranchInfos", "util.HttpPostByJson", err)
+						return
+					}
+					time.Sleep(400 * time.Millisecond)
+					continue
+				}
+				err = json.Unmarshal(firmBody, &firmResp)
+				if err != nil {
+					if i == 2 {
+						slog.Error("getFirmBranchInfos", req.OffName, "基础数据获取失败")
+						return
+					}
+					time.Sleep(400 * time.Millisecond)
+					continue
+				}
+				break
 			}
 			time.Sleep(400 * time.Millisecond)
-			firmResp := reply.FirmBranchInfoReply{}
-			err = json.Unmarshal(firmBody, &firmResp)
-			if err != nil {
-				slog.Error("[getFirmBranchInfos]", "json.Unmarshal", err)
-				return
-			}
 			// 获取各个分所注册会计师信息
 			var cpaNum int
 			cpaNum, err = strconv.Atoi(firmResp.Info.HeadInfo.CpaNum)
@@ -399,18 +454,29 @@ func getFirmBranchInfos(branchInfo []reply.FirmBranchInfo) (firmBranchInfos repl
 			}
 			accountantUrl := conf.System().Url + "publicQuery/getCpaList"
 			var accountantBody []byte
-			accountantBody, err = util.HttpPostByJson(accountantUrl, accountantParam, nil)
-			if err != nil {
-				slog.Error("[getFirmBranchInfos]", "util.HttpPostByJson", err)
-				return
+			accountantResp := reply.AccountantInfoReply{}
+			for i := range RetryCount {
+				accountantBody, err = util.HttpPostByJson(accountantUrl, accountantParam, nil)
+				if err != nil {
+					if i == 2 {
+						slog.Error("getFirmBranchInfos", "util.HttpPostByJson", err)
+						return
+					}
+					time.Sleep(400 * time.Millisecond)
+					continue
+				}
+				err = json.Unmarshal(accountantBody, &accountantResp)
+				if err != nil {
+					if i == 2 {
+						slog.Error("getFirmBranchInfos", req.OffName, "注册会计师数据获取失败")
+						return
+					}
+					time.Sleep(400 * time.Millisecond)
+					continue
+				}
+				break
 			}
 			time.Sleep(400 * time.Millisecond)
-			accountantResp := reply.AccountantInfoReply{}
-			err = json.Unmarshal(accountantBody, &accountantResp)
-			if err != nil {
-				slog.Error("[getFirmBranchInfos]", "json.Unmarshal", err)
-				return
-			}
 			var accountantInfos []reptile_model.AccountantInfo
 			for i, list := range accountantResp.Info.List {
 				accountantInfos = append(accountantInfos, reptile_model.AccountantInfo{
@@ -431,17 +497,27 @@ func getFirmBranchInfos(branchInfo []reply.FirmBranchInfo) (firmBranchInfos repl
 			practitionerUri := fmt.Sprintf("publicQuery/getEmployeeListByPage?offGuid=%s&pageNow=%d&pageSize=%d", req.Id, 1, ondutySum)
 			practitionerUrl := conf.System().Url + practitionerUri
 			var practitionerBody []byte
-			practitionerBody, err = util.HttpPostByJson(practitionerUrl, nil, nil)
-			if err != nil {
-				slog.Error("[getFirmBranchInfos]", "util.HttpPostByJson", err)
-				return
-			}
-			time.Sleep(400 * time.Millisecond)
 			practitionerResp := reply.PractitionerInfoReply{}
-			err = json.Unmarshal(practitionerBody, &practitionerResp)
-			if err != nil {
-				slog.Error("[getFirmBranchInfos]", "json.Unmarshal", err)
-				return
+			for i := range RetryCount {
+				practitionerBody, err = util.HttpPostByJson(practitionerUrl, nil, nil)
+				if err != nil {
+					if i == 2 {
+						slog.Error("getFirmBranchInfos", "util.HttpPostByJson", err)
+						return
+					}
+					time.Sleep(400 * time.Millisecond)
+					continue
+				}
+				err = json.Unmarshal(practitionerBody, &practitionerResp)
+				if err != nil {
+					if i == 2 {
+						slog.Error("getFirmBranchInfos", req.OffName, "从业人员数据获取失败")
+						return
+					}
+					time.Sleep(400 * time.Millisecond)
+					continue
+				}
+				break
 			}
 			var practitionerInfos []reptile_model.PractitionerInfo
 			for i, row := range practitionerResp.Info.ResultMap.Rows {
@@ -691,12 +767,11 @@ func getBaiduToken() (token string, err error) {
 }
 
 // 识别验证码文本
-func getImageText(req reply.CodeReply) (text string, err error) {
+func getImageText(req reply.CodeReply) (text string) {
 	base64Data := req.VerifyText
 	//去掉可能存在的data:image/jpeg;base64,
 	dataParts := strings.Split(base64Data, ",")
 	if len(dataParts) != 2 {
-		err = errors.New("invalid base64 data format")
 		slog.Info("[getImageText]", "strings.Split", "invalid base64 data format")
 		return
 	}
@@ -726,12 +801,13 @@ func getImageText(req reply.CodeReply) (text string, err error) {
 	}
 	if len(resp.WordsResult) == 0 {
 		slog.Error("[getImageText]", "OCR识别错误", "验证长度异常")
-		return "", errors.New("code len err")
+		return
 	}
-	text = resp.WordsResult[0].Words
+	text = strings.TrimSpace(resp.WordsResult[0].Words)
 	if len(text) != 4 {
+		text = ""
 		slog.Error("[getImageText]", "OCR识别错误", "验证长度异常")
-		return "", errors.New("code len err")
+		return
 	}
 	return
 }
