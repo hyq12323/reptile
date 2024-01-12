@@ -18,17 +18,18 @@ type OfficeDetail struct {
 
 // FirmDetail 事务所详情数据
 type FirmDetail struct {
-	OffCode    string `json:"offCode"`    // 执业证书编号
-	OffType    string `json:"offType"`    // 组织形式
-	RegMoney   string `json:"regMoney"`   // 注册资本（万元）
-	CorPoName  string `json:"corpoName"`  // 主任会计师/首席合伙人
-	PassWord   string `json:"passWord"`   // 批准执业文号
-	PassTime   string `json:"passTime"`   // 批准执业日期
-	SubCount   string `json:"subCount"`   // 分所数量
-	CpaNum     string `json:"cpaNum"`     // 注师数量
-	Phone      string `json:"phone"`      // 联系电话
-	Fax        string `json:"fax"`        // 传真
-	OfficeAddr string `json:"officeAddr"` // 经营场所
+	OffName     string `json:"offName"`     // 事务所名称
+	OffCode     string `json:"offCode"`     // 执业证书编号
+	OffType     string `json:"offType"`     // 组织形式
+	RegMoney    string `json:"regMoney"`    // 注册资本（万元）
+	AccountName string `json:"accountName"` // 主任会计师/首席合伙人
+	PassWord    string `json:"passWord"`    // 批准执业文号
+	PassTime    string `json:"passTime"`    // 批准执业日期
+	SubCount    string `json:"subCount"`    // 分所数量
+	CpaNum      string `json:"cpaNum"`      // 注师数量
+	PhoneDecode string `json:"phoneDecode"` // 联系电话
+	Fax         string `json:"fax"`         // 传真
+	OfficeAddr  string `json:"officeAddr"`  // 经营场所
 }
 
 // PartnerInfo 合伙人数据
@@ -96,6 +97,6 @@ func (o FirmBranchInfo) ToExcel() []string {
 
 // ToExcel 实现 ExcelWritable 接口的 ToExcel 方法
 func (o FirmDetail) ToExcel() []string {
-	return []string{o.OffCode, o.OffType, o.RegMoney, o.CorPoName, o.CpaNum, o.PassWord, o.PassTime, o.SubCount, o.CpaNum,
-		o.Phone, o.Fax, o.OfficeAddr}
+	return []string{o.OffName, o.OffCode, o.OffType, o.RegMoney, o.AccountName, o.PassWord, o.PassTime, o.SubCount, o.CpaNum,
+		o.PhoneDecode, o.Fax, o.OfficeAddr}
 }

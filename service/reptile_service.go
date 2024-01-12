@@ -132,11 +132,14 @@ func getFirmInfos(req reply.ReadExcelReply) (registerInfos reptile_model.OfficeD
 		return
 	}
 	var text string
-	for {
+	for i := range RetryCount {
 		text = getImageText(codeResp)
-		slog.Info("[getFirmInfos]", "验证码", text)
 		if text != "" {
 			break
+		}
+		if i == 2 {
+			slog.Error("getFirmInfos", req.Name, "基础数据获取失败")
+			return
 		}
 		// 验证码解析失败，再次获取验证码
 		codeResp, err = getPlatformCode("")
@@ -166,12 +169,15 @@ func getFirmInfos(req reply.ReadExcelReply) (registerInfos reptile_model.OfficeD
 	}
 	err = json.Unmarshal(respBody, &officeReply)
 	if err != nil {
-		slog.Info("getFirmInfos", req.Name, "事务所列表数据获取失败")
+		slog.Info("[getFirmInfos]", req.Name, "事务所列表数据获取失败")
+		return
+	}
+	if len(officeReply.Result.List) == 0 {
+		slog.Info("[getFirmInfos]", req.Name, "事务所列表为空")
 		return
 	}
 	officeDetailParam := map[string]any{
 		"offCode": officeReply.Result.List[0].OffAllCode,
-		"id":      officeReply.Result.List[0].Id,
 	}
 	officeDetailUri := "publicQuery/getOfficeDetailInfo"
 	officeDetailUrl := conf.System().Url + officeDetailUri
@@ -209,19 +215,20 @@ func getFirmInfos(req reply.ReadExcelReply) (registerInfos reptile_model.OfficeD
 	}
 	offType := util.ExtractTextInParentheses(detailReply.Info.HeadInfo.OffName)
 	firmDetail = reptile_model.FirmDetail{
-		OffCode:    detailReply.Info.HeadInfo.OffCode,
-		OffType:    offType,
-		RegMoney:   detailReply.Info.HeadInfo.RegMoney,
-		CorPoName:  detailReply.Info.HeadInfo.CorPoName,
-		PassWord:   detailReply.Info.HeadInfo.PassWord,
-		PassTime:   detailReply.Info.HeadInfo.PassTime,
-		SubCount:   detailReply.Info.HeadInfo.SubCount,
-		CpaNum:     detailReply.Info.HeadInfo.CpaNum,
-		Phone:      detailReply.Info.HeadInfo.Phone,
-		Fax:        detailReply.Info.HeadInfo.Fax,
-		OfficeAddr: detailReply.Info.HeadInfo.OfficeAddr,
+		OffName:     detailReply.Info.HeadInfo.OffName,
+		OffCode:     detailReply.Info.HeadInfo.OffCode,
+		OffType:     offType,
+		RegMoney:    detailReply.Info.HeadInfo.RegMoney,
+		AccountName: detailReply.Info.HeadInfo.AccountName,
+		PassWord:    detailReply.Info.HeadInfo.PassWord,
+		PassTime:    detailReply.Info.HeadInfo.PassTime,
+		SubCount:    detailReply.Info.HeadInfo.SubCount,
+		CpaNum:      detailReply.Info.HeadInfo.CpaNum,
+		PhoneDecode: detailReply.Info.HeadInfo.PhoneDecode,
+		Fax:         detailReply.Info.HeadInfo.Fax,
+		OfficeAddr:  detailReply.Info.HeadInfo.OfficeAddr,
 	}
-	offGuid = officeReply.Result.List[0].Id
+	offGuid = officeReply.Result.List[0].OffAllCode
 	branchInfo = detailReply.Info.SubOfficeList
 	return
 }
@@ -234,7 +241,7 @@ func getPartnerInfos(offGuid, partnerCountStr, name string) (partnerInfos []rept
 	if err != nil {
 		partnerCount = 10
 	}
-	uri := fmt.Sprintf("publicQuery/getPartnerListByPage?offGuid=%s&pageNow=%d&pageSize=%d", offGuid, 1, partnerCount)
+	uri := fmt.Sprintf("publicQuery/getPartnerListByPage?offAllcode=%s&pageNow=%d&pageSize=%d", offGuid, 1, partnerCount)
 	url := conf.System().Url + uri
 	resp := reply.PartnerInfoReply{}
 	var respBody []byte
@@ -283,7 +290,7 @@ func getAccountantInfos(offGuid, offName, CpaNumStr string) (accountantInfos []r
 		cpaNum = 10
 	}
 	param := map[string]any{
-		"offId":       offGuid,
+		"offCode":     offGuid,
 		"currentPage": 1,
 		"pageSize":    cpaNum,
 		"strAge":      "",
@@ -336,7 +343,7 @@ func getPractitionerInfos(offGuid, ondutySumStr, name string) (practitionerInfos
 		ondutySum = 10
 	}
 
-	uri := fmt.Sprintf("publicQuery/getEmployeeListByPage?offGuid=%s&pageNow=%d&pageSize=%d", offGuid, 1, ondutySum)
+	uri := fmt.Sprintf("publicQuery/getEmployeeListByPage?offAllcode=%s&pageNow=%d&pageSize=%d", offGuid, 1, ondutySum)
 	url := conf.System().Url + uri
 	resp := reply.PractitionerInfoReply{}
 	var respBody []byte
@@ -411,8 +418,7 @@ func getFirmBranchInfos(branchInfo []reply.FirmBranchInfo) (firmBranchInfos repl
 			defer wg.Done()
 			// 获取各个分所数量信息
 			firmParam := map[string]any{
-				"id":      req.Id,
-				"offCode": "",
+				"offCode": req.OffCode,
 			}
 			firmUrl := conf.System().Url + "publicQuery/getOfficeDetailInfo"
 			var firmBody []byte
@@ -446,7 +452,7 @@ func getFirmBranchInfos(branchInfo []reply.FirmBranchInfo) (firmBranchInfos repl
 				cpaNum = 10
 			}
 			accountantParam := map[string]any{
-				"offId":       req.Id,
+				"offCode":     req.OffCode,
 				"currentPage": 1,
 				"pageSize":    cpaNum,
 				"strAge":      "",
@@ -494,7 +500,7 @@ func getFirmBranchInfos(branchInfo []reply.FirmBranchInfo) (firmBranchInfos repl
 			if err != nil {
 				ondutySum = 10
 			}
-			practitionerUri := fmt.Sprintf("publicQuery/getEmployeeListByPage?offGuid=%s&pageNow=%d&pageSize=%d", req.Id, 1, ondutySum)
+			practitionerUri := fmt.Sprintf("publicQuery/getEmployeeListByPage?offAllcode=%s&pageNow=%d&pageSize=%d", req.OffCode, 1, ondutySum)
 			practitionerUrl := conf.System().Url + practitionerUri
 			var practitionerBody []byte
 			practitionerResp := reply.PractitionerInfoReply{}
@@ -567,39 +573,39 @@ func getFirmBranchInfos(branchInfo []reply.FirmBranchInfo) (firmBranchInfos repl
 func outPutExcel() (err error) {
 	// 生成事务所excel
 	firmPath := conf.Static().OutputPath + "/" + "事务所.xlsx"
-	err = util.IsFileExist(firmPath)
+	isExist, err := util.IsFileExist(firmPath)
 	if err != nil {
 		slog.Error("[outPutExcel]", "util.IsFileExist", err)
 		return
 	}
 	fireTitle := []string{"会计师事务所名称", "分所数量", "合伙人或股东人数", "注册会计师人数", "从业人员数量", "注册会计师人数（含分所）", "从业人员人数（含分所）"}
-	err = writeExcel(firmPath, fireTitle, RegisterInfos)
+	err = writeExcel(isExist, firmPath, fireTitle, RegisterInfos)
 	if err != nil {
 		slog.Error("[outPutExcel]", "writeExcel", err)
 		return
 	}
 	// 生成事务所合伙人信息
 	partnerPath := conf.Static().OutputPath + "/" + "合伙人.xlsx"
-	err = util.IsFileExist(partnerPath)
+	isExist, err = util.IsFileExist(partnerPath)
 	if err != nil {
 		slog.Error("[outPutExcel]", "util.IsFileExist", err)
 		return
 	}
 	partnerTitle := []string{"会计师事务所名称", "序号", "合伙人（股东）姓名", "是否注师", "注师编号"}
-	err = writeExcel(partnerPath, partnerTitle, PartnerInfos)
+	err = writeExcel(isExist, partnerPath, partnerTitle, PartnerInfos)
 	if err != nil {
 		slog.Error("[outPutExcel]", "writeExcel", err)
 		return
 	}
 	// 生成注册会计师信息
 	accountantPath := conf.Static().OutputPath + "/" + "注册会计师.xlsx"
-	err = util.IsFileExist(accountantPath)
+	isExist, err = util.IsFileExist(accountantPath)
 	if err != nil {
 		slog.Error("[outPutExcel]", "util.IsFileExist", err)
 		return
 	}
 	accountantTitle := []string{"会计师事务所名称", "序号", "姓名", "人员编号", "性别", "考核批准文号"}
-	err = writeExcel(accountantPath, accountantTitle, AccountantInfos)
+	err = writeExcel(isExist, accountantPath, accountantTitle, AccountantInfos)
 	if err != nil {
 		slog.Error("[outPutExcel]", "writeExcel", err)
 		return
@@ -607,64 +613,64 @@ func outPutExcel() (err error) {
 
 	// 生成从业人员信息
 	practitionerPath := conf.Static().OutputPath + "/" + "从业人员.xlsx"
-	err = util.IsFileExist(practitionerPath)
+	isExist, err = util.IsFileExist(practitionerPath)
 	if err != nil {
 		slog.Error("[outPutExcel]", "util.IsFileExist", err)
 		return
 	}
 	practitionerTitle := []string{"会计师事务所名称", "序号", "姓名", "性别", "进所时间", "是否签合同", "是否参加社保", "是否党员"}
-	err = writeExcel(practitionerPath, practitionerTitle, PractitionerInfos)
+	err = writeExcel(isExist, practitionerPath, practitionerTitle, PractitionerInfos)
 	if err != nil {
 		slog.Error("[outPutExcel]", "writeExcel", err)
 		return
 	}
 	// 生成事务所分所excel
 	firmBranchPath := conf.Static().OutputPath + "/" + "事务所（分所）.xlsx"
-	err = util.IsFileExist(firmBranchPath)
+	isExist, err = util.IsFileExist(firmBranchPath)
 	if err != nil {
 		slog.Error("[outPutExcel]", "util.IsFileExist", err)
 		return
 	}
 	fireBranchTitle := []string{"会计师事务所名称", "注册会计师总数", "从业人员总数"}
-	err = writeExcel(firmBranchPath, fireBranchTitle, RegisterBranchInfos)
+	err = writeExcel(isExist, firmBranchPath, fireBranchTitle, RegisterBranchInfos)
 	if err != nil {
 		slog.Error("[outPutExcel]", "writeExcel", err)
 		return
 	}
 	// 生成分所注册会计师信息
 	accountantBranchPath := conf.Static().OutputPath + "/" + "注册会计师（分所）.xlsx"
-	err = util.IsFileExist(accountantBranchPath)
+	isExist, err = util.IsFileExist(accountantBranchPath)
 	if err != nil {
 		slog.Error("[outPutExcel]", "util.IsFileExist", err)
 		return
 	}
-	err = writeExcel(accountantBranchPath, accountantTitle, AccountantBranchInfos)
+	err = writeExcel(isExist, accountantBranchPath, accountantTitle, AccountantBranchInfos)
 	if err != nil {
 		slog.Error("[outPutExcel]", "writeExcel", err)
 		return
 	}
 	// 生成分所从业人员信息
 	practitionerBranchPath := conf.Static().OutputPath + "/" + "从业人员（分所）.xlsx"
-	err = util.IsFileExist(practitionerBranchPath)
+	isExist, err = util.IsFileExist(practitionerBranchPath)
 	if err != nil {
 		slog.Error("[outPutExcel]", "util.IsFileExist", err)
 		return
 	}
-	err = writeExcel(practitionerBranchPath, practitionerTitle, PractitionerBranchInfos)
+	err = writeExcel(isExist, practitionerBranchPath, practitionerTitle, PractitionerBranchInfos)
 	if err != nil {
 		slog.Error("[outPutExcel]", "writeExcel", err)
 		return
 	}
 	// 生成详细事务所信息
 	firmDetailPath := conf.Static().OutputPath + "/" + "事务所基本信息.xlsx"
-	err = util.IsFileExist(firmDetailPath)
+	isExist, err = util.IsFileExist(firmDetailPath)
 	if err != nil {
 		slog.Error("[outPutExcel]", "util.IsFileExist", err)
 		return
 	}
-	fireDetailTitle := []string{"执业证书编号", "组织形式", "注册资本（万元）", "主任会计师/首席合伙人", "批准执业文号", "批准执业日期",
+	fireDetailTitle := []string{"会计师事务所名称", "执业证书编号", "组织形式", "注册资本（万元）", "主任会计师/首席合伙人", "批准执业文号", "批准执业日期",
 		"分所数量", "注师数量", "联系电话", "传真", "经营场所"}
-	err = writeExcel(firmDetailPath, fireDetailTitle, FirmDetailInfos)
+	err = writeExcel(isExist, firmDetailPath, fireDetailTitle, FirmDetailInfos)
 	if err != nil {
 		slog.Error("[outPutExcel]", "writeExcel", err)
 		return
@@ -673,17 +679,32 @@ func outPutExcel() (err error) {
 }
 
 // 写入Excel
-func writeExcel(fileName string, titleRow []string, dataSlice interface{}) (err error) {
-	file := excelize.NewFile()
+func writeExcel(isExist bool, fileName string, titleRow []string, dataSlice interface{}) (err error) {
 	sheetName := "Sheet1"
-	// 写入自定义标题行
-	for col, title := range titleRow {
-		cellName := string('A'+col) + "1"
-		err = file.SetCellValue(sheetName, cellName, title)
+	var file *excelize.File
+	if isExist {
+		file, err = excelize.OpenFile(fileName)
 		if err != nil {
-			return err
+			return
+		}
+	} else {
+		file = excelize.NewFile()
+		// 写入自定义标题行
+		for col, title := range titleRow {
+			cellName := string('A'+col) + "1"
+			err = file.SetCellValue(sheetName, cellName, title)
+			if err != nil {
+				return err
+			}
 		}
 	}
+
+	// 获取已存在的行数
+	rows, err := file.GetRows(sheetName)
+	if err != nil {
+		return err
+	}
+	startRow := len(rows) + 1
 	// 写入结构体数据
 	dataSliceValue := reflect.ValueOf(dataSlice)
 	if dataSliceValue.Kind() == reflect.Slice {
@@ -692,7 +713,7 @@ func writeExcel(fileName string, titleRow []string, dataSlice interface{}) (err 
 			data := dataSliceValue.Index(row).Interface().(reptile_model.ExcelWritable)
 			cellValues := data.ToExcel()
 			for col, value := range cellValues {
-				cellName := string('A'+col) + fmt.Sprint(row+2)
+				cellName := string('A'+col) + fmt.Sprint(row+startRow)
 				err = file.SetCellValue(sheetName, cellName, value)
 				if err != nil {
 					return err
@@ -803,7 +824,7 @@ func getImageText(req reply.CodeReply) (text string) {
 		slog.Error("[getImageText]", "OCR识别错误", "验证长度异常")
 		return
 	}
-	text = strings.TrimSpace(resp.WordsResult[0].Words)
+	text = strings.ReplaceAll(resp.WordsResult[0].Words, " ", "")
 	if len(text) != 4 {
 		text = ""
 		slog.Error("[getImageText]", "OCR识别错误", "验证长度异常")
@@ -861,7 +882,7 @@ func getAscGuid(address string) (ascGuid string) {
 // 获取平台验证码
 func getPlatformCode(verifyId string) (codeResp reply.CodeReply, err error) {
 	// 获取验证码信息
-	codeUrl := conf.System().Url + "nvwa-nros/v1/verify-code/get"
+	codeUrl := conf.System().Url + "anon/nvwa-nros/v1/verify-code/get"
 	codeParam := map[string]string{
 		"verifyId": verifyId,
 	}

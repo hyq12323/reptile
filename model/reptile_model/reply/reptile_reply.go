@@ -37,7 +37,7 @@ type WordResult struct {
 
 // FirmBranchInfo 事务所分所数据
 type FirmBranchInfo struct {
-	Id      string `json:"Id"`
+	OffCode string `json:"offCode"`
 	OffName string `json:"OffName"`
 }
 
@@ -52,10 +52,10 @@ type Firm struct {
 	OffCode       string `json:"offCode"`
 	OffType       string `json:"offType"`
 	RegMoney      string `json:"regMoney"`
-	CorPoName     string `json:"corpoName"`
+	AccountName   string `json:"accountName"`
 	PassWord      string `json:"passWord"`
 	PassTime      string `json:"passTime"`
-	Phone         string `json:"phone"`
+	PhoneDecode   string `json:"phoneDecode"`
 	Fax           string `json:"fax"`
 	OfficeAddr    string `json:"officeAddr"`
 }

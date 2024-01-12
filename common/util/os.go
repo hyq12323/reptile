@@ -7,22 +7,24 @@ import (
 )
 
 // IsFileExist 判断目录下是否有同名Excel，有就删除
-func IsFileExist(fileName string) (err error) {
+func IsFileExist(fileName string) (isExist bool, err error) {
 	_, err = os.Stat(fileName)
 	if err != nil {
 		// 文件不存在
 		if os.IsNotExist(err) {
-			return nil
+			err = nil
+			return
 		}
 		slog.Error("[IsFileExist]", "os.Stat", err)
 		return
 	}
 	// 删除同名文件
-	err = os.Remove(fileName)
-	if err != nil {
-		slog.Error("[IsFileExist]", "os.Remove", err)
-		return
-	}
+	//err = os.Remove(fileName)
+	//if err != nil {
+	//	slog.Error("[IsFileExist]", "os.Remove", err)
+	//	return
+	//}
+	isExist = true
 	return
 }
 
